@@ -188,3 +188,4 @@ r2_CS_gdtot <- r.squaredGLMM(CS_gdtot_reml)
 r2_CS_gdtot
 
 
+ 
