@@ -1,0 +1,67 @@
+##code by adeflamingh
+#install and load packages:
+library("poppr")
+library("pegas")
+library("ape")
+library("adegenet")
+library("ade4")
+
+#set working directory
+setwd("~/Box Sync/FLL/Analyses/R/Gen_data")
+
+
+##LOAD AND TRANSFORM DATA##
+#import data
+R_9msat_142ind <- read_csv("R_9msat_142ind.csv") #insert description of file format
+
+#make genind object
+Elephants.genind <- df2genind(X=R_9msat_142ind[,c(4:12)], sep = "\t", ind.names = R_9msat_142ind$Ele_ID, loc.names = NULL, pop = R_9msat_142ind$PopID, NA.char = NA, ploidy = 2, type = "codom", strata = NULL, hierarchy = NULL) 
+summary_output <- summary(Elephants.genind) 
+#view genind object to verify correct import
+Elephants.genind
+summary_output_genind <- summary(Elephants.genind)
+summary_output_genind
+#convert genind to loci object in package pegas (for easy use later)
+Elephants.loci <- genind2loci(Elephants.genind)
+
+
+
+##CALCULATE GENETIC DISTANCES##
+#Calculate "1-Proportion of shared alleles" using the propShared function in adegenet
+GD_1minPS <- 1 - propShared(Elephants.genind)
+hist(GD_1minPS)
+#write to outfile
+write.csv(GD_1minPS, file = "~/Box Sync/FLL/Analyses/GD_matrices/GD_1minPS.csv",  quote = TRUE,
+          eol = "\n", na = "NA", row.names = TRUE)
+
+#Calculate the euclidean distance among vector of allele frequencies using dist function in adegenet
+GD_euc <- dist(Elephants.genind, method = "euclidean", diag = FALSE, upper = FALSE, p = 2)
+hist(GD_euc)
+#write to outfile
+write.csv(as.matrix(GD_euc), file = "~/Box Sync/FLL/Analyses/GD_matrices/GD_euc.csv",  quote = TRUE,
+          eol = "\n", na = "NA", row.names = TRUE)
+
+#Calculate the number of loci for which individuals differ using the dist.gene function in ape
+GD_locdiff <- dist.gene(Elephants.loci, method="pairwise", pairwise.deletion = FALSE, variance = FALSE)
+hist(GD_locdiff)
+write.csv(as.matrix(GD_locdiff), file = "~/Box Sync/FLL/Analyses/GD_matrices/GD_locdiff.csv",  quote = TRUE,
+          eol = "\n", na = "NA", row.names = TRUE)
+
+#Calculate the number of allelic differences between two individuals using the diss.dist function in poppr
+GD_aldiff <- diss.dist(Elephants.genind, percent = FALSE, mat = FALSE)
+hist(GD_aldiff)
+write.csv(as.matrix(GD_aldiff), file = "~/Box Sync/FLL/Analyses/GD_matrices/GD_aldiff.csv",  quote = TRUE,
+          eol = "\n", na = "NA", row.names = TRUE)
+
+
+#Calculate the Reynolds's distance with the reynolds.dist function in poppr
+GD_reyn <- reynolds.dist(Elephants.genind)
+hist(GD_reyn)
+write.csv(as.matrix(GD_reyn), file = "~/Box Sync/FLL/Analyses/GD_matrices/GD_reyn.csv",  quote = TRUE,
+          eol = "\n", na = "NA", row.names = TRUE)
+
+
+
+
+
+
