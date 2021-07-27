@@ -1,0 +1,411 @@
+#set working directory 
+setwd("~/Box Sync/FLL/Analyses/maxent6")
+
+Sys.setenv(NOAWT=TRUE)
+
+#---------------------------------
+##################################
+#PACKAGES TO INSTALL ON FIRST RUN:
+##################################
+#install necessary packages and libraries
+#install.packages("raster")
+#install.packages("rgdal")
+#install.packages("sf")
+#install.packages("tidyverse")
+#install.packages("fasterize")
+#install.packages("virtualspecies")
+#install.packages("ape")
+#install.packages("maps")
+#install.packages("mapdata")
+#install.packages("dismo")
+#install.packages("rJava")
+#install.packages("maptools")
+#install.packages("jsonlite")
+#install.packages("adehabitatHR")
+#install.packages("sp")
+#install.packages("splancs")
+#install.packages("gdistance")
+
+##################################
+#LOAD PACKAGES
+##################################
+library(sf)
+library(raster)
+library(rgdal)
+library(tidyverse)
+library(rgeos)
+library(scales)
+library(fasterize)
+library(virtualspecies)
+library(ape)
+library(maps)
+library(mapdata)
+library(dismo)
+library(rJava)
+library(maptools)
+library(jsonlite)
+library(adehabitatHR)
+library(sp)
+library(splancs)
+library(gdistance)
+
+##################################
+#SET PARAMETERS
+##################################
+#Set parameters - projection
+
+projection <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+
+#set up extent parameter for use throughout script - extent of study area in southern Africa
+
+
+#use a polygon feature to specify the extent
+ex_poly <- readOGR(dsn=".",layer="range_clip20")
+ext <- extent(ex_poly)
+plot(ext)
+#---------------------------------
+
+
+
+##################################
+#INPUT ENVIRONMENTAL DATA
+##################################
+
+#READ RASTERS
+
+#PEOPLE:Landscan 2016
+assign(paste0("ppl_", "raw"),raster("lspop2016.tif")) #use "dist_16ppkm2_fin.tif" if only areas >16ppkm2
+#assign(paste0("ppl_", "raw"),raster("dist_16ppkm2_fin.tif")) #use "lspop2016.tif" for untransformed raw landscan data
+# reproject to our shared parameter
+assign(paste0("ppl_", "projected"),
+        projectRaster(ppl_raw, crs=projection))
+# create variable equal to final raster
+assign(paste0("ppl_final"), ppl_projected)
+# extend ppl_final to the desired extent with NA values
+ppl_extended <- crop(ppl_final, ext, value=NA)
+plot(ppl_extended)
+
+
+#WATER:distance from waster (calculated from GSW layer - used my asc file)
+assign(paste0("water_", "raw"),raster("h2o_res.asc"))
+# reproject to our shared parameter
+assign(paste0("water_", "projected"),
+       projectRaster(water_raw, crs=projection))
+# create variable equal to final raster
+assign(paste0("water_final"), water_projected)
+# extend water_final to the desired extent with NA values
+water_extended <- crop(water_final, ext, value=NA)
+plot(water_extended)
+
+#ELEVATION:DEM (slope calculated from SMRT data - Jarvis 90X90m)
+assign(paste0("slope_", "raw"),raster("slope_fin.tif"))
+# reproject to our shared parameter
+assign(paste0("slope_", "projected"),
+       projectRaster(slope_raw, crs=projection))
+# create variable equal to final raster
+assign(paste0("slope_final"), slope_projected)
+# extend slope_final to the desired extent with NA values
+slope_extended <- crop(slope_final, ext, value=NA)
+plot(slope_extended)
+
+#EVI:EVI layer average across 16 years, Robson et al 2016
+assign(paste0("evi_", "raw"),raster("evi_res1.asc"))
+# reproject to our shared parameter
+assign(paste0("evi_", "projected"),
+       projectRaster(evi_raw, crs=projection))
+# create variable equal to final raster
+assign(paste0("evi_final"), evi_projected)
+# extend evi_final to the desired extent with NA values
+evi_extended <- crop(evi_final, ext, value=NA)
+plot(evi_extended)
+
+#RESAMPE LAYER RESOLUTION
+ppl_final_re <- resample(ppl_extended, slope_extended)
+water_final_re <- resample(water_extended, slope_extended)
+slope_final_re <- resample(slope_extended, slope_extended)
+evi_final_re <- resample(evi_extended, slope_extended)
+
+#CROP TO VERIFY EXTENT IS THE SAME
+#ppl_tend <- crop(ppl_final_re, ext, value=NA)
+#plot(ppl_tend)
+
+#water_tend <- crop(water_final_re, ext, value=NA)
+#slope_tend <- crop(slope_final_re, ext, value=NA)
+#evi_tend <- crop(evi_final_re, ext, value=NA)
+
+#WRITE OUR ASCII FILES for GUI of MAXENT
+writeRaster(ppl_final_re, filename="ppl_output_test.asc", format='ascii', overwrite=TRUE)
+writeRaster(water_final_re, filename="water_output_test.asc", format='ascii', overwrite=TRUE)
+writeRaster(slope_final_re, filename="slope_output_test.asc", format='ascii', overwrite=TRUE)
+writeRaster(evi_final_re, filename="evi_output_test.asc", format='ascii', overwrite=TRUE)
+
+
+#STACK RASTERS
+predictors <- stack(ppl_final_re,water_final_re,slope_final_re,evi_final_re)
+
+
+#TEST CORRELATION BETWEEN ENVIRONMENTAL VARIABLES
+removeCollinearity(predictors, multicollinearity.cutoff = 0.4,
+                  select.variables = FALSE, sample.points = FALSE, nb.points = 10000,
+                   plot = TRUE)
+
+
+
+##################################
+#INPUT OCCURENCE AND RANDOM BACKGROUND DATA
+##################################
+
+#OCCURENCE
+
+#load occurance shape file
+occ_pnts<- readOGR(dsn=".",layer="Occ_selected")
+occ_pntsdf <- cbind.data.frame(occ_pnts$LONGITUDE, occ_pnts$LATITUDE) #occpnts data frame
+plot(occ_pntsdf)
+#withold 20% of data for testing and model evaluation
+fold <- kfold(occ_pntsdf, k=5)
+occ_test <- occ_pntsdf[fold == 1, ]
+occ_train <- occ_pntsdf[fold !=1, ]
+
+view(occ_train)
+
+##UP TO HERE WORKS 26AUG2020###
+
+
+#BACKGROUND (uncomment one to define bg)
+
+#background data for entire extent (10000 points)
+#background_pnts <- readOGR(dsn=".",layer="Ext_bg20")
+#background_pntsdf <- cbind.data.frame(background_pnts$POINT_X, background_pnts$POINT_Y)
+#plot(background_pnts)
+#view(background_pntsdf)
+
+#background data for extant IUCN range (10000 points)
+background_pnts <- readOGR(dsn=".",layer="Range_bg20")
+background_pntsdf <- cbind.data.frame(background_pnts$POINT_X, background_pnts$POINT_Y)
+#plot(background_pnts)
+#view(background_pntsdf)
+
+#background data for 80% kernel utilization distribution (10000 points)
+#background_pnts <- readOGR(dsn=".",layer="KUD_bg2020")
+#background_pntsdf <- cbind.data.frame(background_pnts$POINT_X, background_pnts$POINT_Y)
+#plot(background_pnts)
+#view(background_pntsdf)
+
+
+##################################
+#RUN MAXENT - edit and run this with different parameters
+##################################
+jar <- paste(system.file(package="dismo"), "/java/maxent.jar", sep='')
+
+##edit paths for output if you want seperate runs in seperate folders
+##extentbg_kfold_beta1to4 (example path)
+##rangebg_kfold_beta1to4 (example path)
+#kudbg_kfold_beta1to4 (example path)
+
+#create model
+me1 <- maxent(predictors, occ_train, a=background_pntsdf, removeDuplicates=TRUE, path=paste0("/Users/alida/Box Sync/FLL/Analyses/maxent6/maxent_outputs/rangebg_kfold_beta1to4/beta1"), args=c("-J", "-P", "betamultiplier=1", "outputformat=logistic")) #change betaparam here, also change output format if needed
+me2 <- maxent(predictors, occ_train, a=background_pntsdf, removeDuplicates=TRUE, path=paste0("/Users/alida/Box Sync/FLL/Analyses/maxent6/maxent_outputs/rangebg_kfold_beta1to4/beta2"), args=c("-J", "-P", "betamultiplier=2", "outputformat=logistic")) #change betaparam here
+me3 <- maxent(predictors, occ_train, a=background_pntsdf, removeDuplicates=TRUE, path=paste0("/Users/alida/Box Sync/FLL/Analyses/maxent6/maxent_outputs/rangebg_kfold_beta1to4/beta3"), args=c("-J", "-P", "betamultiplier=3", "outputformat=logistic")) #change betaparam here
+me4 <- maxent(predictors, occ_train, a=background_pntsdf, removeDuplicates=TRUE, path=paste0("/Users/alida/Box Sync/FLL/Analyses/maxent6/maxent_outputs/rangebg_kfold_beta1to4/beta4"), args=c("-J", "-P", "betamultiplier=4", "outputformat=logistic")) #change betaparam here
+
+#extend model prediction, project, and write output HSM raster
+#par(mfrow=c(2,2), mar=c(0.5, 0.5, 0.2, 0.2))
+me1.raster <- predict(me1, predictors, args=c("outputformat=logistic"), progress='text', filename='me1_HSM')
+me1.projected <- projectRaster(me1.raster, crs = projection)
+writeRaster(me1.projected, filename="me1_HSM.asc", format='ascii', overwrite=TRUE) #this is the HSM
+plot(me1.projected, ext=evi_projected)
+
+me2.raster <- predict(me2, predictors, args=c("outputformat=logistic"), progress='text', filename='me2_HSM')
+me2.projected <- projectRaster(me2.raster, crs = projection)
+writeRaster(me2.projected, filename="me2_HSM.asc", format='ascii', overwrite=TRUE) #this is the HSM
+plot(me2.projected, ext=evi_projected)
+
+me3.raster <- predict(me3, predictors, args=c("outputformat=logistic"), progress='text', filename='me3_HSM')
+me3.projected <- projectRaster(me3.raster, crs = projection)
+writeRaster(me3.projected, filename="me3_HSM.asc", format='ascii', overwrite=TRUE) #this is the HSM
+plot(me3.projected, ext=evi_projected)
+
+me4.raster <- predict(me4, predictors, args=c("outputformat=logistic"), progress='text', filename='me4_HSM')
+me4.projected <- projectRaster(me4.raster, crs = projection)
+writeRaster(me4.projected, filename="me4_HSM.asc", format='ascii', overwrite=TRUE) #this is the HSM
+plot(me4.projected, ext=evi_projected)
+
+
+#print model predictor variables of each maxent model
+me1
+me2
+me3
+me4
+
+
+#plot the predictor variable contribution
+par(mfrow=c(2,2))
+plot(me1, ext=evi_projected)
+plot(me2, ext=evi_projected)
+plot(me3, ext=evi_projected)
+plot(me4, ext=evi_projected)
+
+
+#evaluate model
+e1 <- evaluate(me1, p=occ_test, a=background_pntsdf, x=predictors)
+e2 <- evaluate(me2, p=occ_test, a=background_pntsdf, x=predictors)
+e3 <- evaluate(me3, p=occ_test, a=background_pntsdf, x=predictors)
+e4 <- evaluate(me4, p=occ_test, a=background_pntsdf, x=predictors)
+
+
+#plot area under curve for each model
+par(mfrow=c(2,2))
+plot(e1, 'ROC')
+plot(e2, 'ROC')
+plot(e3, 'ROC')
+plot(e4, 'ROC')
+
+
+#print evaluation statistics
+e1 
+e2
+e3
+e4 
+
+
+#------------------------------------------------
+#Choose the model with the best outcome (AUC/gain) and continue onwards with that model only
+#------------------------------------------------
+
+#this code is to "reload" HSM raster so that you don't have to rerun all of the MaxEnt code:
+#(hash out 2 lines below if running from scratch)
+#me1.raster <- raster("me1_HSM.asc", crs=projection) #where me1_HSM.asc is the output raster from MaxEnt
+#me1.projected <- projectRaster(me1.raster, crs =projection)
+par(mfrow=c(1,1), mar=c(2, 2.5, 1, 0.2))
+plot(me1.projected)
+
+
+##CONVERT HSM TO COST/RESISTANCE SURFACE:
+#the functional transformations are based on Keeley et al 2016. 
+
+fun1 <- function(x){1-x} #function for linear transformation 1-hs
+fun2 <- function(x){100-99*((1-exp(-2*x))/(1-exp(-2)))} #non-linear negative exponential transformation Keeley 2016 at c = 2
+fun3 <- function(x){100-99*((1-exp(-8*x))/(1-exp(-8)))} #non-linear negative exponential transformation Keeley 2016 at c = 8
+lin_cost <- calc(me1.projected, fun1)
+nonlin_cost2 <- calc(me1.projected, fun2)
+nonlin_cost8 <- calc(me1.projected, fun3)
+par(mfrow=c(3,1))
+plot(lin_cost)
+plot(nonlin_cost2)
+plot(nonlin_cost8)
+#project before export
+lin_cost.proj <- projectRaster(lin_cost, crs = projection)
+nonlin_cost2.proj <- projectRaster(nonlin_cost2, crs = projection)
+nonlin_cost8.proj <- projectRaster(nonlin_cost8, crs = projection)
+
+#make pretty maps
+par(mfrow=c(3,1), mar=c(2, 2.5, 1, 0.2))
+plot(lin_cost.proj, ext=evi_projected, col=heat.colors(100, alpha = 1, rev = TRUE))
+plot(nonlin_cost2.proj, ext=evi_projected, col=heat.colors(100, alpha = 1, rev = TRUE))
+plot(nonlin_cost8.proj, ext=evi_projected, col=heat.colors(100, alpha = 1, rev = TRUE))
+
+writeRaster(lin_cost.proj, filename="lincost.asc", format="ascii")
+writeRaster(nonlin_cost2.proj, filename="nlincost2.asc", format="ascii")
+writeRaster(nonlin_cost8.proj, filename="nlincost8.asc", format="ascii")
+
+
+##To plot the transformation curves:
+par(mfrow=c(2,1), mar=c(3, 2, 0.5, 0.5))
+curve(fun1(x)) #curve for linear
+curve(fun2(x)) #curve subtle nonlinear
+curve(fun3(x), add = TRUE) #add extreme nonlinear to subtle
+
+##################################
+#Calculate pairwise distances - Euclidean, LCP, IBR
+##################################
+
+
+#######this section of code is to continue/resume without rerunning above section#########
+lin_cost.proj <- raster("lincost.asc", crs=projection)
+nonlin_cost2.proj <- raster("nlincost2.asc", crs=projection)
+nonlin_cost8.proj <- raster("nlincost8.asc", crs=projection)
+par(mfrow=c(3,1), mar=c(2, 2.5, 1, 0.2))
+plot(lin_cost.proj, col=heat.colors(100, alpha = 1, rev = TRUE))
+plot(nonlin_cost2.proj, col=heat.colors(100, alpha = 1))
+plot(nonlin_cost8.proj, col=heat.colors(100, alpha = 1, rev = TRUE))
+#######this section of code is to continue/resume without rerunning above section#########
+
+
+
+
+setwd("~/Box Sync/FLL/Analyses/euc_LCP_CT")
+
+
+#Import genetic data location points
+gen_pnts<- readOGR(dsn=".",layer="142nDNA")
+gen_pntsdf <- cbind.data.frame(gen_pnts$Long, gen_pnts$Lat) #gen data pnts data frame for plotting
+plot(gen_pntsdf)
+connect_pnts <- cbind(c(gen_pnts$Long), cbind(gen_pnts$Lat)) #Spatial points for input into gdistance
+
+
+#---------
+#LCP and CD - in package gdistance
+#---------
+
+#Create transition matrix for each resistance surface
+tr.lincost <- transition(1/lin_cost.proj, transitionFunction=mean, directions=8)
+tr.nonlincost2 <- transition(1/nonlin_cost2.proj, transitionFunction=mean, directions=8)
+tr.nonlincost8 <- transition(1/nonlin_cost8.proj, transitionFunction=mean, directions=8)
+tr.lincost.corr <- geoCorrection(tr.lincost, type="c")
+tr.nonlincost2.corr <- geoCorrection(tr.nonlincost2, type="c")
+tr.nonlincost8.corr <- geoCorrection(tr.nonlincost8, type="c")
+
+tr.lincost <- 0
+tr.nonlincost2 <- 0
+tr.nonlincost8 <- 0
+
+
+#calculate pairwise costdistance (LCP):
+pcost_LCPlin <- costDistance(tr.lincost.corr, connect_pnts)
+pcost_LCPnlin2 <- costDistance(tr.nonlincost2.corr, connect_pnts)
+pcost_LCPnlin8 <- costDistance(tr.nonlincost8.corr, connect_pnts)
+
+#calculate pairwise commutedistance (CD):
+pcost_CDlin <- commuteDistance(tr.lincost.corr, connect_pnts)
+pcost_CDPnlin2 <- commuteDistance(tr.nonlincost2.corr, connect_pnts)
+pcost_CDPnlin8 <- commuteDistance(tr.nonlincost8.corr, connect_pnts)
+
+#write matrix as CSV with sample names for LCP
+LCPlin.dist<-as.data.frame(as.matrix(pcost_LCPlin))
+colnames(LCPlin.dist) <- gen_pnts$Ele_ID #add sample name as headers
+rownames(LCPlin.dist) <- gen_pnts$Ele_ID #add sample name as headers
+write.csv(LCPlin.dist,file = "LCPlin.dist.csv")
+
+LCPnlin2.dist<-as.data.frame(as.matrix(pcost_LCPnlin2))
+colnames(LCPnlin2.dist) <- gen_pnts$Ele_ID #add sample name as headers
+rownames(LCPnlin2.dist) <- gen_pnts$Ele_ID #add sample name as headers
+write.csv(LCPnlin2.dist,file = "LCPnlin2.dist.csv")
+
+LCPnlin8.dist<-as.data.frame(as.matrix(pcost_LCPnlin8))
+colnames(LCPnlin8.dist) <- gen_pnts$Ele_ID #add sample name as headers
+rownames(LCPnlin8.dist) <- gen_pnts$Ele_ID #add sample name as headers
+write.csv(LCPnlin8.dist,file = "LCPnlin8.dist.csv")
+
+#write matrix as CSV with sample names for CD
+CDlin.dist<-as.data.frame(as.matrix(pcost_CDlin))
+colnames(CDlin.dist) <- gen_pnts$Ele_ID #add sample name as headers
+rownames(CDlin.dist) <- gen_pnts$Ele_ID #add sample name as headers
+write.csv(CDlin.dist,file = "CDlin.dist.csv")
+
+CDnlin2.dist<-as.data.frame(as.matrix(pcost_CDnlin2))
+colnames(CDnlin2.dist) <- gen_pnts$Ele_ID #add sample name as headers
+rownames(CDnlin2.dist) <- gen_pnts$Ele_ID #add sample name as headers
+write.csv(CDnlin2.dist,file = "CDnlin2.dist.csv")
+
+CDnlin8.dist<-as.data.frame(as.matrix(pcost_CDnlin8))
+colnames(CDnlin8.dist) <- gen_pnts$Ele_ID #add sample name as headers
+rownames(CDnlin8.dist) <- gen_pnts$Ele_ID #add sample name as headers
+write.csv(CDnlin8.dist,file = "CDnlin8.dist.csv")
+
+
+
+
+##NEXT TO DO IS MLPE CODE
+
+
+
