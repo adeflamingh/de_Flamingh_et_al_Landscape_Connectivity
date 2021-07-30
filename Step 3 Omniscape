@@ -1,0 +1,32 @@
+[This code uses Julia to run omniscale- see https://docs.circuitscape.org/Omniscape.jl/stable/ and https://julialang.org/downloads/]
+
+[Required]
+resistance_file = INSERT TOP SDM MODEL PATHWAY
+[radius is how much of the surrounding area will be considered to assign a pixel a random-walk value. for elephants, we are using ~30km with 90x90. Radius units are pixels]
+radius = 334
+[block size is used if we want to spatially separate random walk pixels-for this project we want all pixels considered, so use block size 1]
+block_size = 1
+project_name = INSERT EXIT PATHWAY
+
+[General options]
+[source from resistance means that we are not providing locations for sources, but rather using every pixel in the resistance map to estimate connectivity]
+source_from_resistance = true
+
+[SDM is already converted into a cost matrix. If using non-converted SDM output, we can assign the values as conductances rather than resitsances]
+resistance_is_conductance=false
+[r_cutoff will not estimate cells with a certain value. We'll keep this Inf so that all pixels are estimated]
+r_cutoff = Inf
+[calc normalized current will estimate current of pixels after removing the flow potential. This will disentangle IBD effects from the effects of the SDM]
+calc_normalized_current = true
+[calc flow potential will show current across the landscape with uniform resistance (without resistance)]
+calc_flow_potential =true
+
+[parallelize will allow multiple threads to process, decreasing processing time]
+parallelize = true
+[parallel batch size is how many batches to send to a processor at a time. 10 is the default]
+parallel_batch_size = 10
+
+[Output options]
+[This will write the raw current map. The different maps are related as raw_current_map-flow_potential=normalized_current]
+write_raw_currmap = true
+
