@@ -1,4 +1,5 @@
 [This code uses Julia to run omniscale- see https://docs.circuitscape.org/Omniscape.jl/stable/ and https://julialang.org/downloads/]
+[this is the .ini file. to run on Julia, run Pkg Omniscape, then run_omniscape("Path/to/.ini/file")]
 
 [Required]
 resistance_file = INSERT TOP SDM MODEL PATHWAY
