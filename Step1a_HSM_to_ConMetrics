@@ -168,7 +168,6 @@ occ_train <- occ_pntsdf[fold !=1, ]
 
 view(occ_train)
 
-##UP TO HERE WORKS 26AUG2020###
 
 
 #BACKGROUND (uncomment one to define bg)
